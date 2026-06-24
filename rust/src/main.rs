@@ -2,7 +2,7 @@
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::hex::DisplayHex;
 use bitcoin::Address;
-use bitcoincore_rpc::bitcoin::{Amount, Network};
+use bitcoincore_rpc::bitcoin::{Amount, Network, Txid};
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use serde::Deserialize;
 use serde_json::json;
@@ -135,14 +135,19 @@ fn main() -> bitcoincore_rpc::Result<()> {
 
     // Send 20 BTC from Miner to Trader
     let tx_id = send(&miner, &trader_address.to_string(), 20.0)?;
+    println!("tx_id {}", tx_id);
 
     // Check transaction in mempool
-
-    println!("trader bal {} ", trader.get_balance(None, None)?);
+    let mempool = rpc.get_raw_mempool()?;
+    println!("Mempool txids: {:#?}", mempool);
 
     // Mine 1 block to confirm the transaction
+    miner.generate_to_address(1, &miner_address)?;
 
     // Extract all required transaction details
+    let tx_id: Txid = tx_id.parse().unwrap();
+    let tx = miner.get_transaction(&tx_id, None);
+    println!("tx details: {:#?}", tx);
 
     // Write the data to ../out.txt in the specified format given in readme.md
 
