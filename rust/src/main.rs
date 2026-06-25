@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::fs::File;
 use std::io::Write;
+use std::vec;
 
 // Node access params
 const RPC_URL: &str = "http://127.0.0.1:18443"; // Default regtest RPC port
@@ -52,36 +53,6 @@ fn wallet_loader(rpc: &Client, wallet_name: &str) -> bitcoincore_rpc::Result<Cli
     )?)
 }
 
-fn check_wallets() {
-    let rpc = Client::new(
-        // RPC_URL,
-        &format!("{}/wallet/{}", RPC_URL, "Trader"),
-        Auth::UserPass(RPC_USER.to_owned(), RPC_PASS.to_owned()),
-    )
-    .unwrap();
-
-    let received = rpc
-        .list_received_by_address(None, Some(1), None, None)
-        .unwrap();
-    for item in received {
-        println!("Received Address: {:?}", item.address);
-    }
-
-    let rpc = Client::new(
-        // RPC_URL,
-        &format!("{}/wallet/{}", RPC_URL, "Miner"),
-        Auth::UserPass(RPC_USER.to_owned(), RPC_PASS.to_owned()),
-    )
-    .unwrap();
-
-    let received = rpc
-        .list_received_by_address(None, Some(1), None, None)
-        .unwrap();
-    for item in received {
-        println!("Received Address: {:?}", item.address);
-    }
-}
-
 fn main() -> bitcoincore_rpc::Result<()> {
     // check_wallets();
     // return Ok(());
@@ -113,7 +84,7 @@ fn main() -> bitcoincore_rpc::Result<()> {
 
     // Generate spendable balances in the Miner wallet. How many blocks needs to be mined?
     let miner_address = miner
-        .get_new_address(None, None)
+        .get_new_address(Some("Mining Reward"), None)
         .unwrap()
         .require_network(Network::Regtest)
         .unwrap();
@@ -126,7 +97,7 @@ fn main() -> bitcoincore_rpc::Result<()> {
 
     // Load Trader wallet and generate a new address
     let trader_address = trader
-        .get_new_address(None, None)
+        .get_new_address(Some("Received"), None)
         .unwrap()
         .require_network(Network::Regtest)
         .unwrap();
@@ -134,22 +105,55 @@ fn main() -> bitcoincore_rpc::Result<()> {
     println!("trader_address {} ", trader_address);
 
     // Send 20 BTC from Miner to Trader
-    let tx_id = send(&miner, &trader_address.to_string(), 20.0)?;
+    let tx_id: Txid = send(&miner, &trader_address.to_string(), 20.0)?
+        .parse()
+        .unwrap();
+
     println!("tx_id {}", tx_id);
 
     // Check transaction in mempool
-    let mempool = rpc.get_raw_mempool()?;
-    println!("Mempool txids: {:#?}", mempool);
+    let tx = rpc.get_mempool_entry(&tx_id)?;
+    println!("Unconfirmed transaction: {:#?}", tx);
 
     // Mine 1 block to confirm the transaction
     miner.generate_to_address(1, &miner_address)?;
+    println!("========================================================");
 
     // Extract all required transaction details
-    let tx_id: Txid = tx_id.parse().unwrap();
-    let tx = miner.get_transaction(&tx_id, None);
-    println!("tx details: {:#?}", tx);
+    let raw_tx = miner.get_raw_transaction_info(&tx_id, None)?;
+    println!("tx details: {:#?}", raw_tx.vin);
+    let wallet_tx = miner.get_transaction(&tx_id, None);
+    // println!("wallet_tx details: {:#?}", wallet_tx);
+
+    let vin = &raw_tx.vin[0];
+    let previous_txid = vin.txid.unwrap();
+    let previous_vout = vin.vout.unwrap() as usize;
+    let previous_raw_tx = rpc.get_raw_transaction_info(&previous_txid, None)?;
+    let input_vout = &previous_raw_tx.vout[previous_vout];
+
+    let miner_input_address = input_vout
+        .script_pub_key
+        .address
+        .clone()
+        .expect("input address")
+        .assume_checked()
+        .to_string();
+
+    println!("miner_input_address {}", miner_input_address);
+
+    let miner_input_amount = input_vout.value;
+    println!("miner_input_amount {}", miner_input_amount);
 
     // Write the data to ../out.txt in the specified format given in readme.md
+
+    // let mut out_file = std::fs::File::create("../out.txt")?;
+    // use std::io::Write;
+    // writeln!(out_file, "tx_id {}", tx_id)?;
+    // writeln!(out_file, "miner_input_address {}", miner_input_address)?;
+    // writeln!(out_file, "miner_input_amount {}", miner_input_amount)?;
+    // writeln!(out_file, "trader_address {}", trader_address)?;
+
+    // writeln!(out_file, "miner_address {}", miner_address)?;
 
     Ok(())
 }
