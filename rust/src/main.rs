@@ -42,38 +42,23 @@ fn wallet_loader(rpc: &Client, wallet_name: &str) -> bitcoincore_rpc::Result<Cli
     let wallet_list = rpc.list_wallets()?;
     if !wallet_list.contains(&wallet_name.to_string()) {
         // Attempt to load it first in case it exists but isn't loaded
-        if let Err(_) = rpc.load_wallet(wallet_name) {
+        if rpc.load_wallet(wallet_name).is_err() {
             // If loading fails, create it fresh
             rpc.create_wallet(wallet_name, Some(false), Some(false), None, None)?;
         }
     }
-    Ok(Client::new(
+    Client::new(
         &format!("{}/wallet/{}", RPC_URL, wallet_name),
         Auth::UserPass(RPC_USER.to_owned(), RPC_PASS.to_owned()),
-    )?)
+    )
 }
 
 fn main() -> bitcoincore_rpc::Result<()> {
-    // check_wallets();
-    // return Ok(());
-
     // Connect to Bitcoin Core RPC
     let rpc = Client::new(
         RPC_URL,
-        // &format!("{}/wallet/{}", RPC_URL, "Trader"),
         Auth::UserPass(RPC_USER.to_owned(), RPC_PASS.to_owned()),
     )?;
-
-    // let received = rpc
-    //     .list_received_by_address(None, Some(1), None, None)
-    //     .unwrap();
-    // for item in received {
-    //     println!("Received Address: {:?}", item.address);
-    // }
-
-    // Get blockchain info
-    // let blockchain_info = rpc.get_blockchain_info()?;
-    // println!("Blockchain Info: {:?}", blockchain_info);
 
     // Create/Load the wallets, named 'Miner' and 'Trader'. Have logic to optionally create/load them if they do not exist or not loaded already.
     let miner = wallet_loader(&rpc, "Miner")?;
@@ -91,9 +76,11 @@ fn main() -> bitcoincore_rpc::Result<()> {
 
     println!("miner_address {} ", miner_address);
 
-    // miner.generate_to_address(103, &miner_address)?;
+    miner.generate_to_address(103, &miner_address)?;
+    // 100 confirmations requirements is a security mechanism exist to prevent
+    // duoble spending and prevent miner reward loss from blockchain forks
 
-    println!("Miner bal {} ", miner.get_balance(None, None)?);
+    println!("Miner balance {} ", miner.get_balance(None, None)?);
 
     // Load Trader wallet and generate a new address
     let trader_address = trader
@@ -122,8 +109,15 @@ fn main() -> bitcoincore_rpc::Result<()> {
     // Extract all required transaction details
     let raw_tx = miner.get_raw_transaction_info(&tx_id, None)?;
     println!("tx details: {:#?}", raw_tx.vin);
-    let wallet_tx = miner.get_transaction(&tx_id, None);
+    let wallet_tx = miner.get_transaction(&tx_id, None).unwrap();
     // println!("wallet_tx details: {:#?}", wallet_tx);
+
+    let block_hash = wallet_tx.info.blockhash.expect("tx must be confirmed");
+
+    let block_info = rpc.get_block_info(&block_hash)?;
+    let block_height = block_info.height;
+
+    let tx_fees = wallet_tx.fee.expect("fee must be present").to_btc();
 
     let vin = &raw_tx.vin[0];
     let previous_txid = vin.txid.unwrap();
@@ -141,19 +135,43 @@ fn main() -> bitcoincore_rpc::Result<()> {
 
     println!("miner_input_address {}", miner_input_address);
 
-    let miner_input_amount = input_vout.value;
+    let miner_input_amount = input_vout.value.to_btc();
     println!("miner_input_amount {}", miner_input_amount);
 
+    let trader_address_string = trader_address.to_string();
+
+    let mut trader_output_address = String::new();
+    let mut trader_output_amount = 0.0f64;
+    let mut miner_change_address = String::new();
+    let mut miner_change_amount = 0.0f64;
+
+    for vout in &raw_tx.vout {
+        let addr = match vout.script_pub_key.address.clone() {
+            Some(a) => a.assume_checked().to_string(),
+            None => continue, // if invalid skip vout
+        };
+
+        if addr == trader_address_string {
+            trader_output_address = addr;
+            trader_output_amount = vout.value.to_btc();
+        } else {
+            miner_change_address = addr;
+            miner_change_amount = vout.value.to_btc();
+        }
+    }
+
     // Write the data to ../out.txt in the specified format given in readme.md
-
-    // let mut out_file = std::fs::File::create("../out.txt")?;
-    // use std::io::Write;
-    // writeln!(out_file, "tx_id {}", tx_id)?;
-    // writeln!(out_file, "miner_input_address {}", miner_input_address)?;
-    // writeln!(out_file, "miner_input_amount {}", miner_input_amount)?;
-    // writeln!(out_file, "trader_address {}", trader_address)?;
-
-    // writeln!(out_file, "miner_address {}", miner_address)?;
+    let mut out_file = File::create("../out.txt")?;
+    writeln!(out_file, "{}", tx_id)?;
+    writeln!(out_file, "{}", miner_input_address)?;
+    writeln!(out_file, "{}", miner_input_amount)?;
+    writeln!(out_file, "{}", trader_address)?;
+    writeln!(out_file, "{}", trader_output_amount)?;
+    writeln!(out_file, "{}", miner_change_address)?;
+    writeln!(out_file, "{}", miner_change_amount)?;
+    writeln!(out_file, "{}", tx_fees)?;
+    writeln!(out_file, "{}", block_height)?;
+    writeln!(out_file, "{}", block_hash)?;
 
     Ok(())
 }
