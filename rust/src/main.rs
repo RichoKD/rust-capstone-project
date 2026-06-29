@@ -65,7 +65,6 @@ fn main() -> bitcoincore_rpc::Result<()> {
     let trader = wallet_loader(&rpc, "Trader")?;
 
     let wallets = miner.list_wallets()?;
-    println!("Wallets: {:?}", wallets);
 
     // Generate spendable balances in the Miner wallet. How many blocks needs to be mined?
     let miner_address = miner
@@ -73,8 +72,6 @@ fn main() -> bitcoincore_rpc::Result<()> {
         .unwrap()
         .require_network(Network::Regtest)
         .unwrap();
-
-    println!("miner_address {} ", miner_address);
 
     miner.generate_to_address(103, &miner_address)?;
     // 100 confirmations requirements is a security mechanism exist to prevent
@@ -89,28 +86,20 @@ fn main() -> bitcoincore_rpc::Result<()> {
         .require_network(Network::Regtest)
         .unwrap();
 
-    println!("trader_address {} ", trader_address);
-
     // Send 20 BTC from Miner to Trader
     let tx_id: Txid = send(&miner, &trader_address.to_string(), 20.0)?
         .parse()
         .unwrap();
 
-    println!("tx_id {}", tx_id);
-
     // Check transaction in mempool
     let tx = rpc.get_mempool_entry(&tx_id)?;
-    println!("Unconfirmed transaction: {:#?}", tx);
 
     // Mine 1 block to confirm the transaction
     miner.generate_to_address(1, &miner_address)?;
-    println!("========================================================");
 
     // Extract all required transaction details
     let raw_tx = miner.get_raw_transaction_info(&tx_id, None)?;
-    println!("tx details: {:#?}", raw_tx.vin);
     let wallet_tx = miner.get_transaction(&tx_id, None).unwrap();
-    // println!("wallet_tx details: {:#?}", wallet_tx);
 
     let block_hash = wallet_tx.info.blockhash.expect("tx must be confirmed");
 
@@ -133,10 +122,7 @@ fn main() -> bitcoincore_rpc::Result<()> {
         .assume_checked()
         .to_string();
 
-    println!("miner_input_address {}", miner_input_address);
-
     let miner_input_amount = input_vout.value.to_btc();
-    println!("miner_input_amount {}", miner_input_amount);
 
     let trader_address_string = trader_address.to_string();
 
